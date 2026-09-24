@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         苏州大学网课自动播放
 // @namespace    local.polymas.auto-next
-// @version      1.2.1
+// @version      1.2.2
 // @author       Hanratty211
 // @license      MIT
 // @homepageURL  https://github.com/Hanratty211/soochow-university-course-autoplay
@@ -27,6 +27,8 @@
     lockedSelector: '[aria-disabled="true"], [disabled], [data-icon="lock"], .anticon-lock, .el-icon-lock, [class*="icon-lock"], [class*="icon_lock"]',
     unlockTimeout: 90000,
     playerTimeout: 30000,
+    catalogReloadDelay: 2500,
+    reloadPage: () => location.reload(),
   };
   const STORAGE_KEY = 'soochow-course-autoplay-state-v1';
   const loadSaved = () => {
@@ -42,8 +44,10 @@
     order: Array.isArray(saved.order) ? saved.order.filter(item => typeof item === 'string') : [],
     returnAfterEnd: saved.returnAfterEnd === true,
     completed: typeof saved.completed === 'string' ? saved.completed : '',
+    catalogReloadAttempted: saved.catalogReloadAttempted === true,
     pending: null,
     switching: false, generation: 0, blockedVideo: null, stopped: false,
+    catalogWaitStarted: Date.now(), catalogReloadScheduled: false,
   };
   const videoHandlers = new Map();
   const handledEnds = new WeakMap();
@@ -71,6 +75,7 @@
         order: state.order,
         returnAfterEnd: state.returnAfterEnd,
         completed: state.completed,
+        catalogReloadAttempted: state.catalogReloadAttempted,
       }));
     } catch { /* 存储被禁用时仍可在单页内工作。 */ }
   };
@@ -201,7 +206,28 @@
   function resumeFromCatalog() {
     if (!state.enabled || !state.returnAfterEnd || state.switching || isDetailPage()) return false;
     const items = rows();
-    if (items.length < 2) return false;
+    if (items.length < 2) {
+      const pageText = normalize(document.body?.innerText || document.body?.textContent);
+      const explicitlyEmpty = /暂无数据|暂无学习资源|共\s*0\s*个学习资源/.test(pageText);
+      if (explicitlyEmpty && Date.now() - state.catalogWaitStarted >= CONFIG.catalogReloadDelay) {
+        if (!state.catalogReloadAttempted && !state.catalogReloadScheduled) {
+          state.catalogReloadScheduled = true;
+          state.catalogReloadAttempted = true;
+          saveState();
+          report('返回后课程列表显示无数据，正在自动刷新一次…');
+          setTimeout(() => {
+            if (!state.stopped && state.returnAfterEnd) CONFIG.reloadPage();
+          }, 300);
+        } else if (state.catalogReloadAttempted && !state.catalogReloadScheduled) {
+          report('刷新后课程列表仍无数据，请手动刷新或重新进入课程。');
+        }
+      }
+      return false;
+    }
+    if (state.catalogReloadAttempted) {
+      state.catalogReloadAttempted = false;
+      saveState();
+    }
     state.order = items.map(item => item.name);
     let index = items.findIndex(item => sameLesson(item.name, state.completed));
     if (index < 0) index = items.findIndex(item => sameLesson(item.name, state.current));
@@ -225,6 +251,7 @@
     state.current = next.name;
     state.returnAfterEnd = false;
     state.completed = '';
+    state.catalogReloadAttempted = false;
     state.pending = makePending();
     saveState();
     report(`正在打开：${next.name}`);
@@ -323,6 +350,8 @@
           if (isDetailPage()) {
             state.returnAfterEnd = true;
             state.completed = oldName || inferCurrentFromPage();
+            state.catalogReloadAttempted = false;
+            state.catalogWaitStarted = Date.now();
             saveState();
             const back = returnButton();
             if (back) {

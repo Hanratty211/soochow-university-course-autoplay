@@ -7,11 +7,12 @@ const { JSDOM } = require('jsdom');
 
 const source = readFileSync(resolve(__dirname, '../polymas-auto-next.user.js'), 'utf8');
 function fixture(extra = '', options = {}) {
-  const dom = new JSDOM(`<body><ul>
+  const catalog = options.emptyCatalog ? '<div>共 0 个学习资源</div><div>暂无数据</div>' : `<ul>
     <li><span>必学</span><span id="first">[6.1] 提示工程导引.mp4</span></li>
     <li><span>必学</span><span id="second">[6.2] 提示词设计原则与优化技巧.mp4</span></li>
     <li><span>必学</span><span id="third">[6.3] 高级提示模式.mp4</span><i data-icon="lock"></i></li>
-    </ul><video src="one.mp4"></video>${extra}`, {
+    </ul>`;
+  const dom = new JSDOM(`<body>${catalog}<video src="one.mp4"></video>${extra}`, {
     url: `https://hike-teaching-center.polymas.com/study${options.detail ? '/resource-detail' : ''}`, runScripts: 'outside-only',
   });
   const w = dom.window;
@@ -32,7 +33,7 @@ function fixture(extra = '', options = {}) {
     w.sessionStorage.setItem('soochow-course-autoplay-state-v1', JSON.stringify(options.saved));
   }
   w.eval(source.replace(/\}\)\(\);\s*$/, 'window.qa = {state, CONFIG, onClick, rows, locked, advance, scan, tryPlay}; })();'));
-  if (!options.detail) {
+  if (!options.detail && w.document.querySelector('#first')) {
     w.qa.onClick({ isTrusted: true, target: w.document.querySelector('#first') });
     // 旧回归用例从“已播放完第一节”的状态开始；入口播放单独验证。
     w.qa.state.pending = null;
@@ -290,5 +291,32 @@ test('即使没有预先记录目录，详情页也能从标题记录已完成�
     const stored = JSON.parse(f.w.sessionStorage.getItem('soochow-course-autoplay-state-v1'));
     assert.equal(stored.returnAfterEnd, true);
     assert.match(stored.completed, /\[6\.2\]/);
+  } finally { f.close(); }
+});
+
+test('返回目录显示暂无数据时只自动刷新一次', async () => {
+  const saved = {
+    enabled: true,
+    current: '[6.1] 提示工程导引.mp4',
+    returnAfterEnd: true,
+    completed: '[6.1] 提示工程导引.mp4',
+    catalogReloadAttempted: false,
+  };
+  const f = fixture('', { saved, emptyCatalog: true });
+  try {
+    let reloads = 0;
+    f.q.CONFIG.catalogReloadDelay = 0;
+    f.q.CONFIG.reloadPage = () => { reloads++; };
+    f.q.state.catalogWaitStarted = 0;
+    f.q.scan();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(reloads, 1);
+    assert.equal(f.q.state.catalogReloadAttempted, true);
+    assert.match(f.w.__POLYMAS_AUTO_NEXT__.status().message, /自动刷新一次/);
+    f.q.state.catalogReloadScheduled = false;
+    f.q.scan();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(reloads, 1);
+    assert.match(f.w.__POLYMAS_AUTO_NEXT__.status().message, /仍无数据/);
   } finally { f.close(); }
 });
