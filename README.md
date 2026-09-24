@@ -2,7 +2,7 @@
 
 适用于 `hike-teaching-center.polymas.com` 的用户脚本。手动打开课程后，尝试启动视频播放；当前视频正常结束后，尝试打开并播放下一节。
 
-**[点击安装 / 更新脚本](https://raw.githubusercontent.com/Hanratty211/soochow-university-course-autoplay/main/polymas-auto-next.user.js)** · [下载发布包](https://github.com/Hanratty211/soochow-university-course-autoplay/releases) · [反馈问题](https://github.com/Hanratty211/soochow-university-course-autoplay/issues)
+**[点击安装 / 更新脚本](https://github.com/Hanratty211/soochow-university-course-autoplay/raw/refs/heads/main/polymas-auto-next.user.js)** · [下载发布包](https://github.com/Hanratty211/soochow-university-course-autoplay/releases) · [反馈问题](https://github.com/Hanratty211/soochow-university-course-autoplay/issues)
 
 > 当前版本：**v1.2.1 预览版**。已通过自动化模拟测试，并根据真实详情页截图修复了跨页面续播；仍需在完整课程流程中继续验证。
 
@@ -31,7 +31,7 @@
 
 这是浏览器或扩展没有接管安装链接时的备用办法：
 
-1. 打开 [脚本源文件](https://raw.githubusercontent.com/Hanratty211/soochow-university-course-autoplay/main/polymas-auto-next.user.js)，全选、复制全部内容。
+1. 打开 [脚本源文件](https://github.com/Hanratty211/soochow-university-course-autoplay/raw/refs/heads/main/polymas-auto-next.user.js)，全选、复制全部内容。
 2. 点击浏览器工具栏的脚本猫或油猴图标，进入脚本管理界面，选择 **新建脚本 / 添加新脚本**。
 3. 删除编辑器里的默认模板，粘贴代码。Mac 按 `⌘S`，Windows 按 `Ctrl+S`，也可以点保存按钮。
 4. 检查脚本已启用，回到课程页面刷新。
