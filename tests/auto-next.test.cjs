@@ -28,6 +28,9 @@ function fixture(extra = '', options = {}) {
   });
   let initialPlays = 0;
   video.play = async () => { initialPlays++; video.paused = false; };
+  if (options.saved) {
+    w.sessionStorage.setItem('soochow-course-autoplay-state-v1', JSON.stringify(options.saved));
+  }
   w.eval(source.replace(/\}\)\(\);\s*$/, 'window.qa = {state, CONFIG, onClick, rows, locked, advance, scan, tryPlay}; })();'));
   if (!options.detail) {
     w.qa.onClick({ isTrusted: true, target: w.document.querySelector('#first') });
@@ -230,5 +233,62 @@ test('暂停续播后再手动选课不会启动播放', () => {
     f.q.scan();
     assert.equal(f.q.state.pending, null);
     assert.equal(f.initialPlays(), 0);
+  } finally { f.close(); }
+});
+
+test('详情页播放结束后保存课程并点击返回目录', async () => {
+  const saved = {
+    enabled: true,
+    current: '[6.1] 提示工程导引.mp4',
+    order: ['[6.1] 提示工程导引.mp4', '[6.2] 提示词设计原则与优化技巧.mp4'],
+  };
+  const f = fixture('<button id="back">返回</button>', { detail: true, saved });
+  try {
+    let clicks = 0;
+    f.w.document.querySelector('#back').addEventListener('click', () => clicks++);
+    f.video.ended = true;
+    f.video.paused = false;
+    await f.q.advance(f.video);
+    const stored = JSON.parse(f.w.sessionStorage.getItem('soochow-course-autoplay-state-v1'));
+    assert.equal(clicks, 1);
+    assert.equal(stored.returnAfterEnd, true);
+    assert.equal(stored.completed, '[6.1] 提示工程导引.mp4');
+    assert.match(f.w.__POLYMAS_AUTO_NEXT__.status().message, /返回目录/);
+  } finally { f.close(); }
+});
+
+test('返回目录后根据保存状态自动打开下一节', () => {
+  const saved = {
+    enabled: true,
+    current: '[6.1] 提示工程导引.mp4',
+    order: ['[6.1] 提示工程导引.mp4', '[6.2] 提示词设计原则与优化技巧.mp4'],
+    returnAfterEnd: true,
+    completed: '[6.1] 提示工程导引.mp4',
+  };
+  const f = fixture('', { saved });
+  try {
+    let clicks = 0;
+    f.w.document.querySelector('#second').addEventListener('click', () => clicks++);
+    f.q.state.returnAfterEnd = true;
+    f.q.state.completed = saved.completed;
+    f.q.scan();
+    const stored = JSON.parse(f.w.sessionStorage.getItem('soochow-course-autoplay-state-v1'));
+    assert.equal(clicks, 1);
+    assert.equal(f.q.state.current, '[6.2] 提示词设计原则与优化技巧.mp4');
+    assert.equal(stored.returnAfterEnd, false);
+    assert.equal(stored.completed, '');
+  } finally { f.close(); }
+});
+
+test('即使没有预先记录目录，详情页也能从标题记录已完成课程', async () => {
+  const f = fixture('<h1>[6.2] 提示词设计原则与优化技巧</h1><button id="back">返回</button>', { detail: true });
+  try {
+    f.q.state.current = '';
+    f.video.ended = true;
+    f.video.paused = false;
+    await f.q.advance(f.video);
+    const stored = JSON.parse(f.w.sessionStorage.getItem('soochow-course-autoplay-state-v1'));
+    assert.equal(stored.returnAfterEnd, true);
+    assert.match(stored.completed, /\[6\.2\]/);
   } finally { f.close(); }
 });

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         苏州大学网课自动播放
 // @namespace    local.polymas.auto-next
-// @version      1.1.0
+// @version      1.2.0
 // @author       Hanratty211
 // @license      MIT
 // @homepageURL  https://github.com/Hanratty211/soochow-university-course-autoplay
@@ -28,8 +28,21 @@
     unlockTimeout: 90000,
     playerTimeout: 30000,
   };
+  const STORAGE_KEY = 'soochow-course-autoplay-state-v1';
+  const loadSaved = () => {
+    try {
+      const value = JSON.parse(sessionStorage.getItem(STORAGE_KEY) || '{}');
+      return value && typeof value === 'object' ? value : {};
+    } catch { return {}; }
+  };
+  const saved = loadSaved();
   const state = {
-    enabled: true, current: '', order: [], pending: null,
+    enabled: saved.enabled !== false,
+    current: typeof saved.current === 'string' ? saved.current : '',
+    order: Array.isArray(saved.order) ? saved.order.filter(item => typeof item === 'string') : [],
+    returnAfterEnd: saved.returnAfterEnd === true,
+    completed: typeof saved.completed === 'string' ? saved.completed : '',
+    pending: null,
     switching: false, generation: 0, blockedVideo: null, stopped: false,
   };
   const videoHandlers = new Map();
@@ -42,6 +55,24 @@
     if (value.length > 260 || (value.match(/\.mp4\b/gi) || []).length !== 1) return '';
     const match = value.match(/(?:\[[\d.]+\]\s*)?[^\n]*?\.mp4\b/i);
     return match ? match[0].replace(/^(?:必学|选学)\s*/, '').trim() : '';
+  };
+  const lessonKey = text => normalize(text)
+    .replace(/^(?:必学|选学)\s*/, '')
+    .replace(/\.mp4\b/i, '')
+    .replace(/\s+/g, '')
+    .toLowerCase();
+  const sameLesson = (left, right) => !!left && !!right && lessonKey(left) === lessonKey(right);
+  const isDetailPage = () => /\/resource-detail(?:\/|$)/.test(location.pathname);
+  const saveState = () => {
+    try {
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify({
+        enabled: state.enabled,
+        current: state.current,
+        order: state.order,
+        returnAfterEnd: state.returnAfterEnd,
+        completed: state.completed,
+      }));
+    } catch { /* 存储被禁用时仍可在单页内工作。 */ }
   };
   const visible = element => !!element?.isConnected && !!element.getClientRects().length &&
     element.ownerDocument.defaultView.getComputedStyle(element).visibility !== 'hidden';
@@ -102,7 +133,23 @@
     // 弹窗可能只显示当前标题，不能用它覆盖完整目录。
     if (items.length >= 2 && items.some(item => item.name === state.current)) {
       state.order = items.map(item => item.name);
+      saveState();
     }
+  }
+
+  function inferCurrentFromPage() {
+    if (state.current) {
+      const pageText = normalize(document.body?.innerText || document.body?.textContent);
+      if (!isDetailPage() || pageText.includes(state.current.replace(/\.mp4\b/i, ''))) return state.current;
+    }
+    const candidates = [...document.querySelectorAll('h1, h2, h3, header, [class*="title"], [class*="name"]')]
+      .filter(element => visible(element) && !panel.contains(element))
+      .map(element => normalize(element.textContent))
+      .filter(text => text && text.length <= 180);
+    const known = state.order.find(name => candidates.some(text => text.includes(name.replace(/\.mp4\b/i, ''))));
+    if (known) return known;
+    const numbered = candidates.find(text => /\[[\d.]+\]/.test(text));
+    return numbered ? numbered.replace(/\s*(?:必学|选学)\s*$/, '').trim() : '';
   }
 
   function locked(element) {
@@ -130,6 +177,52 @@
       if (found) return found;
     }
     return null;
+  }
+
+  function returnButton() {
+    for (const doc of getDocuments()) {
+      const found = [...doc.querySelectorAll('button, a, [role="button"]')].find(element => {
+        if (panel.contains(element) || !visible(element)) return false;
+        const text = normalize(element.getAttribute('aria-label') || element.getAttribute('title') || element.textContent);
+        return /^(?:[‹<←]\s*)?返回(?:课程|目录|上一页)?$/.test(text);
+      });
+      if (found) return found;
+    }
+    return null;
+  }
+
+  function resumeFromCatalog() {
+    if (!state.enabled || !state.returnAfterEnd || state.switching || isDetailPage()) return false;
+    const items = rows();
+    if (items.length < 2) return false;
+    state.order = items.map(item => item.name);
+    let index = items.findIndex(item => sameLesson(item.name, state.completed));
+    if (index < 0) index = items.findIndex(item => sameLesson(item.name, state.current));
+    if (index < 0) {
+      report('已返回目录，但未找到刚播放的课程。请展开对应章节。');
+      saveState();
+      return false;
+    }
+    const next = items[index + 1];
+    if (!next) {
+      saveState();
+      report('当前展开的目录中没有下一节。若课程尚未结束，请展开下一个章节。');
+      return false;
+    }
+    if (locked(next.row)) {
+      report(`已返回目录，等待下一节解锁：${next.name}`);
+      saveState();
+      return false;
+    }
+    state.switching = true;
+    state.current = next.name;
+    state.returnAfterEnd = false;
+    state.completed = '';
+    state.pending = makePending();
+    saveState();
+    report(`正在打开：${next.name}`);
+    (next.label.closest('a, button, [role="button"]') || next.label).click();
+    return true;
   }
 
   function closePlayerDialog(video) {
@@ -200,7 +293,11 @@
     state.switching = true;
     const generation = state.generation;
     const oldSource = signature(video);
-    const oldName = state.current;
+    const oldName = state.current || inferCurrentFromPage();
+    if (oldName && !state.current) {
+      state.current = oldName;
+      saveState();
+    }
     const deadline = Date.now() + CONFIG.unlockTimeout;
     report('视频已结束，等待下一节可播放…');
     rememberOrder(rows());
@@ -215,13 +312,27 @@
         const oldIndex = state.order.indexOf(oldName);
         let nextName = oldIndex >= 0 ? state.order[oldIndex + 1] || '' : '';
         if (!button) {
+          if (isDetailPage()) {
+            state.returnAfterEnd = true;
+            state.completed = oldName || inferCurrentFromPage();
+            saveState();
+            const back = returnButton();
+            if (back) {
+              report('视频已结束，正在返回目录查找下一节…');
+              back.click();
+              clicked = true;
+              return;
+            }
+            report('视频已结束，但没有找到“返回”按钮。请手动返回课程目录，脚本会继续打开下一节。');
+            return;
+          }
           if (!closed) { closePlayerDialog(video); closed = true; await sleep(500); }
           if (!alive(generation)) return;
           const items = rows();
           rememberOrder(items);
           const index = state.order.indexOf(oldName);
           if (index < 0) {
-            report('未识别当前课程。请从目录手动打开一节视频，再继续观看。');
+            report('未识别当前课程。请返回目录并展开当前章节。');
             return;
           }
           nextName = state.order[index + 1];
@@ -237,6 +348,7 @@
           state.pending = makePending(video);
           state.pending.oldSource = oldSource;
           if (nextName) state.current = nextName;
+          saveState();
           report(`正在打开：${nextName || '下一节视频'}`);
           target.click();
           clicked = true;
@@ -263,6 +375,7 @@
     play.hidden = true;
     state.current = item.name;
     rememberOrder(rows());
+    saveState();
     report(`${state.enabled ? '已选课，等待播放器并自动播放' : '已暂停续播'}：${item.name}`);
   }
 
@@ -270,6 +383,7 @@
     if (state.stopped) return;
     try {
       const docs = getDocuments();
+      if (resumeFromCatalog()) return;
       for (const [doc, handler] of documents) {
         if (!docs.includes(doc)) { doc.removeEventListener('click', handler, true); documents.delete(doc); }
       }
@@ -318,6 +432,7 @@
     state.blockedVideo = null;
     play.hidden = true;
     toggle.textContent = state.enabled ? '暂停续播' : '开启续播';
+    saveState();
     report(state.enabled ? '已开启，请播放当前视频；播完后自动续播。' : '已暂停自动续播，当前视频可继续播放。');
   });
   play.addEventListener('click', () => {
@@ -346,11 +461,16 @@
     },
     status: () => ({ enabled: state.enabled, current: state.current, message: status.textContent }),
   };
-  if (/\/resource-detail(?:\/|$)/.test(location.pathname)) {
+  if (isDetailPage()) {
+    const inferred = inferCurrentFromPage();
+    if (inferred) state.current = inferred;
     state.pending = makePending();
+    saveState();
     report('已进入视频页，等待播放器并自动播放…');
   } else {
-    report('已开启。从目录打开视频后，将自动尝试播放。');
+    report(state.returnAfterEnd
+      ? '已返回目录，正在定位下一节…'
+      : '已开启。从目录打开视频后，将自动尝试播放。');
   }
   scan();
 })();
