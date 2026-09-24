@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         苏州大学网课自动播放
 // @namespace    local.polymas.auto-next
-// @version      1.2.0
+// @version      1.2.1
 // @author       Hanratty211
 // @license      MIT
 // @homepageURL  https://github.com/Hanratty211/soochow-university-course-autoplay
@@ -146,6 +146,13 @@
       .filter(element => visible(element) && !panel.contains(element))
       .map(element => normalize(element.textContent))
       .filter(text => text && text.length <= 180);
+    if (!candidates.some(text => /\[[\d.]+\]/.test(text))) {
+      candidates.push(...[...document.body.querySelectorAll('*')]
+        .filter(element => visible(element) && !panel.contains(element) &&
+          ![...element.children].some(child => /\[[\d.]+\]/.test(normalize(child.textContent))))
+        .map(element => normalize(element.textContent))
+        .filter(text => /^\[[\d.]+\]\s*\S/.test(text) && text.length <= 180));
+    }
     const known = state.order.find(name => candidates.some(text => text.includes(name.replace(/\.mp4\b/i, ''))));
     if (known) return known;
     const numbered = candidates.find(text => /\[[\d.]+\]/.test(text));
@@ -222,6 +229,7 @@
     saveState();
     report(`正在打开：${next.name}`);
     (next.label.closest('a, button, [role="button"]') || next.label).click();
+    state.switching = false;
     return true;
   }
 
@@ -405,6 +413,9 @@
             video.addEventListener('playing', playing);
             videoHandlers.set(video, { ended, ready, playing });
           }
+          if (isDetailPage() && video.ended) {
+            void advance(video).catch(error => report(`续播失败：${error.message}`));
+          }
           if (state.pending) void tryPlay(video);
         }
       }
@@ -461,7 +472,10 @@
     },
     status: () => ({ enabled: state.enabled, current: state.current, message: status.textContent }),
   };
-  if (isDetailPage()) {
+  toggle.textContent = state.enabled ? '暂停续播' : '开启续播';
+  if (!state.enabled) {
+    report('自动播放与续播已暂停。');
+  } else if (isDetailPage()) {
     const inferred = inferCurrentFromPage();
     if (inferred) state.current = inferred;
     state.pending = makePending();

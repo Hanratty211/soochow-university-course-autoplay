@@ -4,7 +4,7 @@
 
 **[点击安装 / 更新脚本](https://raw.githubusercontent.com/Hanratty211/soochow-university-course-autoplay/main/polymas-auto-next.user.js)** · [下载发布包](https://github.com/Hanratty211/soochow-university-course-autoplay/releases) · [反馈问题](https://github.com/Hanratty211/soochow-university-course-autoplay/issues)
 
-> 当前版本：**v1.2.0 预览版**。已通过自动化模拟测试，并根据真实详情页截图修复了跨页面续播；仍需在完整课程流程中继续验证。
+> 当前版本：**v1.2.1 预览版**。已通过自动化模拟测试，并根据真实详情页截图修复了跨页面续播；仍需在完整课程流程中继续验证。
 
 ## 安装：已有脚本猫或油猴
 
